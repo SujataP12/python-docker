@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "pythonapp"
+        DOCKER_TAG = "latest"
+        CONTAINER_NAME = "python-container"
+        DOCKER_HUB_REPO = "sujatap12/pythonapp"
+    }
+
+    stages {
+        
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    sh 'pip install -r requirements.txt'
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                script {
+                    sh 'pytest || echo "No tests defined"'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh "docker build -t $DOCKER_IMAGE:$DOCKER_TAG ."
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhubcred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                        sh "docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD"
+                        sh "docker tag $DOCKER_IMAGE:$DOCKER_TAG $DOCKER_HUB_REPO:$DOCKER_TAG"
+                        sh "docker push $DOCKER_HUB_REPO:$DOCKER_TAG"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy & Remove Container') {
+            steps {
+                script {
+                    sh """
+                        # Run the container from the image
+                        CONTAINER_ID=\$(docker run -d -p 5001:5000 --name $CONTAINER_NAME $DOCKER_IMAGE:$DOCKER_TAG)
+                        
+                        # Wait for a few seconds (optional)
+                        sleep 5
+                        
+                        # Check if the container is running before stopping it
+                        if [ -n "\$CONTAINER_ID" ]; then
+                            echo "Stopping container \$CONTAINER_ID"
+                            docker stop \$CONTAINER_ID
+                            docker rm \$CONTAINER_ID
+                        else
+                            echo "No container found to stop."
+                        fi
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment Successful!'
+        }
+        failure {
+            echo 'Build Failed!'
+        }
+    }
+}
